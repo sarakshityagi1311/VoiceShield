@@ -1,147 +1,179 @@
-import React, { useState } from 'react';
-import axios from 'axios';
-import { ShieldCheck, AlertTriangle, Database, Cpu, RefreshCw } from 'lucide-react';
-import './index.css';
+import React, { useState, useEffect } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://voice-shield-4.onrender.com";
+// Read API URL from Vite environment variable, fallback to Render URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://voiceshield-api.onrender.com';
 
 export default function App() {
-  const [walletAddress, setWalletAddress] = useState("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [verificationResult, setVerificationResult] = useState(null);
+  const [status, setStatus] = useState('Checking connection...');
   const [logs, setLogs] = useState([]);
-  const [logsLoading, setLogsLoading] = useState(false);
+  const [backendStatus, setBackendStatus] = useState('offline');
 
-  const handleVerify = async (e) => {
+  // Check backend connectivity on mount
+  useEffect(() => {
+    checkHealth();
+  }, []);
+
+  const checkHealth = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/health`);
+      if (res.ok) {
+        const data = await res.json();
+        setBackendStatus(data.status === 'healthy' ? 'online' : 'degraded');
+        setStatus('Backend online and ready.');
+      } else {
+        setBackendStatus('offline');
+        setStatus('Backend returned non-200 response.');
+      }
+    } catch (err) {
+      setBackendStatus('offline');
+      setStatus('Cannot reach backend server.');
+    }
+  };
+
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      setFile(e.target.files[0]);
+    }
+  };
+
+  const handleUpload = async (e) => {
     e.preventDefault();
-    if (!file || !walletAddress) return;
+    if (!file) {
+      alert('Please select an audio file first.');
+      return;
+    }
 
     setLoading(true);
-    setVerificationResult(null);
+    setStatus('Uploading audio and requesting verification...');
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append('file', file);
 
     try {
-      const res = await axios.post(`${API_BASE}/verify-voice?user_address=${walletAddress}`, formData, {
-  headers: { 
-    "Content-Type": "multipart/form-data",
-    "ngrok-skip-browser-warning": "69420"
-  }
-});
-      setVerificationResult(res.data);
-      fetchLogs();
-    } catch (err) {
-      alert("Error processing audio: " + (err.response?.data?.detail || err.message));
+      const response = await fetch(`${API_BASE_URL}/verify-audio`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      setStatus(`Processing complete! Verdict: ${result.is_deepfake ? 'DEEPFAKE DETECTED' : 'AUTHENTIC VOICE'}`);
+      
+      // Append new log item
+      setLogs((prev) => [
+        {
+          id: Date.now(),
+          filename: file.name,
+          verdict: result.is_deepfake ? 'Deepfake' : 'Authentic',
+          txHash: result.tx_hash || 'Pending / Local',
+          timestamp: new Date().toLocaleTimeString(),
+        },
+        ...prev,
+      ]);
+    } catch (error) {
+      console.error('Processing Error:', error);
+      alert(`Error processing audio: ${error.message}`);
+      setStatus('Network Error / Processing failed.');
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchLogs = async () => {
-    if (!walletAddress) return;
-    setLogsLoading(true);
-    try {
-      const res = await axios.get(`${API_BASE}/on-chain-logs/${walletAddress}`);
-      setLogs(res.data.logs || []);
-    } catch (err) {
-      console.error("Failed to load logs:", err);
-    } finally {
-      setLogsLoading(false);
-    }
-  };
-
   return (
-    <div className="app-container">
-      <header className="header">
-        <ShieldCheck size={40} color="#38bdf8" />
-        <div>
-          <h1>VoiceShield</h1>
-          <p>Synthetic Voice Detection & Immutable EVM Audit Registry</p>
+    <div style={styles.container}>
+      <header style={styles.header}>
+        <h1>VoiceShield Audit Dashboard</h1>
+        <div style={styles.badgeContainer}>
+          <span style={{
+            ...styles.badge,
+            backgroundColor: backendStatus === 'online' ? '#22c55e' : '#ef4444'
+          }}>
+            API: {backendStatus.toUpperCase()}
+          </span>
         </div>
       </header>
 
-      <div className="grid-layout">
-        {/* Analysis Form */}
-        <div className="card">
-          <h2 className="card-title">
-            <Cpu size={22} color="#38bdf8" /> Analyze Voice Sample
-          </h2>
-
-          <form onSubmit={handleVerify}>
-            <div className="form-group">
-              <label>Target Wallet Address</label>
-              <input
-                type="text"
-                className="input-text"
-                value={walletAddress}
-                onChange={(e) => setWalletAddress(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="form-group">
-              <label>Audio Payload (.wav)</label>
-              <input
-                type="file"
-                accept=".wav"
-                onChange={(e) => setFile(e.target.files[0])}
-                style={{ color: '#94a3b8', fontSize: '0.9rem' }}
-                required
-              />
-            </div>
-
-            <button type="submit" className="btn-primary" disabled={loading}>
-              {loading ? "Evaluating Audio..." : "Verify & Commit"}
+      <main style={styles.main}>
+        {/* Upload Card */}
+        <div style={styles.card}>
+          <h2>Verify Voice Recording</h2>
+          <form onSubmit={handleUpload} style={styles.form}>
+            <input 
+              type="file" 
+              accept="audio/*" 
+              onChange={handleFileChange} 
+              style={styles.fileInput} 
+            />
+            <button 
+              type="submit" 
+              disabled={loading || !file} 
+              style={loading ? {...styles.button, opacity: 0.6} : styles.button}
+            >
+              {loading ? 'Processing...' : 'Verify & Commit On-Chain'}
             </button>
           </form>
-
-          {verificationResult && (
-            <div className={`result-card ${verificationResult.is_synthetic ? 'synthetic' : 'authentic'}`}>
-              <h3 style={{ fontSize: '1.05rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                {verificationResult.is_synthetic ? <AlertTriangle color="#ef4444" /> : <ShieldCheck color="#10b981" />}
-                {verificationResult.is_synthetic ? "Synthetic Voice Detected" : "Authentic Audio Verified"}
-              </h3>
-              <p style={{ fontSize: '0.9rem' }}><strong>Spoof Score:</strong> {verificationResult.spoof_score_pct}%</p>
-              <p style={{ fontSize: '0.9rem' }}><strong>On-Chain Logged:</strong> {verificationResult.logged_on_chain ? "Yes" : "No"}</p>
-            </div>
-          )}
+          <p style={styles.statusText}><strong>Status:</strong> {status}</p>
         </div>
 
-        {/* Audit Log Panel */}
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-            <h2 className="card-title" style={{ margin: 0 }}>
-              <Database size={22} color="#38bdf8" /> Smart Contract Logs
-            </h2>
-            <button onClick={fetchLogs} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <RefreshCw size={14} /> Refresh
-            </button>
-          </div>
-
-          {logsLoading ? (
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Querying EVM RPC Node...</p>
-          ) : logs.length === 0 ? (
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No audit entries registered for this wallet address.</p>
+        {/* Audit Log Table */}
+        <div style={styles.card}>
+          <h2>Smart Contract Audit Logs</h2>
+          {logs.length === 0 ? (
+            <p style={styles.emptyText}>No verifications executed in this session.</p>
           ) : (
-            <div style={{ maxHeight: '360px', overflowY: 'auto', paddingRight: '0.25rem' }}>
-              {logs.map((log) => (
-                <div key={log.record_id} className="log-item">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-                    <span>Record #{log.record_id}</span>
-                    <span>{log.timestamp}</span>
-                  </div>
-                  <p className="log-hash">Hash: {log.audio_hash}</p>
-                  <p style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                    <strong>Score:</strong> {log.spoof_score_pct}% | <strong>Synthetic:</strong> {log.is_synthetic ? "True" : "False"}
-                  </p>
-                </div>
-              ))}
-            </div>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={styles.th}>Time</th>
+                  <th style={styles.th}>File</th>
+                  <th style={styles.th}>Result</th>
+                  <th style={styles.th}>Transaction Hash</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map((log) => (
+                  <tr key={log.id}>
+                    <td style={styles.td}>{log.timestamp}</td>
+                    <td style={styles.td}>{log.filename}</td>
+                    <td style={styles.td}>
+                      <span style={{
+                        color: log.verdict === 'Deepfake' ? '#ef4444' : '#22c55e',
+                        fontWeight: 'bold'
+                      }}>
+                        {log.verdict}
+                      </span>
+                    </td>
+                    <td style={{...styles.td, fontFamily: 'monospace'}}>{log.txHash}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
-      </div>
+      </main>
     </div>
   );
 }
+
+// Inline styles object for quick setup
+const styles = {
+  container: { maxWidth: '900px', margin: '0 auto', padding: '20px', fontFamily: 'sans-serif', color: '#1e293b' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' },
+  badgeContainer: { display: 'flex', gap: '10px' },
+  badge: { color: '#fff', padding: '4px 12px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' },
+  main: { marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '20px' },
+  card: { padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc' },
+  form: { display: 'flex', gap: '10px', margin: '15px 0' },
+  fileInput: { padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', flexGrow: 1 },
+  button: { padding: '10px 20px', backgroundColor: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
+  statusText: { fontSize: '14px', color: '#64748b' },
+  emptyText: { color: '#94a3b8', fontStyle: 'italic' },
+  table: { width: '100%', borderCollapse: 'collapse', marginTop: '10px' },
+  th: { textAlign: 'left', borderBottom: '2px solid #cbd5e1', padding: '8px', fontSize: '14px' },
+  td: { padding: '8px', borderBottom: '1px solid #e2e8f0', fontSize: '14px' }
+};
