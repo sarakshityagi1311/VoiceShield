@@ -1,122 +1,144 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import React, { useState } from 'react';
+import axios from 'axios';
+import { ShieldCheck, AlertTriangle, Database, Cpu, RefreshCw } from 'lucide-react';
+import './index.css';
 
-function App() {
-  const [count, setCount] = useState(0)
+const API_BASE = "http://127.0.0.1:8000";
+
+export default function App() {
+  const [walletAddress, setWalletAddress] = useState("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [verificationResult, setVerificationResult] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
+  const handleVerify = async (e) => {
+    e.preventDefault();
+    if (!file || !walletAddress) return;
+
+    setLoading(true);
+    setVerificationResult(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await axios.post(`${API_BASE}/verify-voice?user_address=${walletAddress}`, formData, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
+      setVerificationResult(res.data);
+      fetchLogs();
+    } catch (err) {
+      alert("Error processing audio: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!walletAddress) return;
+    setLogsLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE}/on-chain-logs/${walletAddress}`);
+      setLogs(res.data.logs || []);
+    } catch (err) {
+      console.error("Failed to load logs:", err);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
+    <div className="app-container">
+      <header className="header">
+        <ShieldCheck size={40} color="#38bdf8" />
         <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
+          <h1>VoiceShield</h1>
+          <p>Synthetic Voice Detection & Immutable EVM Audit Registry</p>
         </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+      </header>
 
-      <div className="ticks"></div>
+      <div className="grid-layout">
+        {/* Analysis Form */}
+        <div className="card">
+          <h2 className="card-title">
+            <Cpu size={22} color="#38bdf8" /> Analyze Voice Sample
+          </h2>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+          <form onSubmit={handleVerify}>
+            <div className="form-group">
+              <label>Target Wallet Address</label>
+              <input
+                type="text"
+                className="input-text"
+                value={walletAddress}
+                onChange={(e) => setWalletAddress(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Audio Payload (.wav)</label>
+              <input
+                type="file"
+                accept=".wav"
+                onChange={(e) => setFile(e.target.files[0])}
+                style={{ color: '#94a3b8', fontSize: '0.9rem' }}
+                required
+              />
+            </div>
+
+            <button type="submit" className="btn-primary" disabled={loading}>
+              {loading ? "Evaluating Audio..." : "Verify & Commit"}
+            </button>
+          </form>
+
+          {verificationResult && (
+            <div className={`result-card ${verificationResult.is_synthetic ? 'synthetic' : 'authentic'}`}>
+              <h3 style={{ fontSize: '1.05rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                {verificationResult.is_synthetic ? <AlertTriangle color="#ef4444" /> : <ShieldCheck color="#10b981" />}
+                {verificationResult.is_synthetic ? "Synthetic Voice Detected" : "Authentic Audio Verified"}
+              </h3>
+              <p style={{ fontSize: '0.9rem' }}><strong>Spoof Score:</strong> {verificationResult.spoof_score_pct}%</p>
+              <p style={{ fontSize: '0.9rem' }}><strong>On-Chain Logged:</strong> {verificationResult.logged_on_chain ? "Yes" : "No"}</p>
+            </div>
+          )}
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+        {/* Audit Log Panel */}
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+            <h2 className="card-title" style={{ margin: 0 }}>
+              <Database size={22} color="#38bdf8" /> Smart Contract Logs
+            </h2>
+            <button onClick={fetchLogs} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <RefreshCw size={14} /> Refresh
+            </button>
+          </div>
+
+          {logsLoading ? (
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Querying EVM RPC Node...</p>
+          ) : logs.length === 0 ? (
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No audit entries registered for this wallet address.</p>
+          ) : (
+            <div style={{ maxHeight: '360px', overflowY: 'auto', paddingRight: '0.25rem' }}>
+              {logs.map((log) => (
+                <div key={log.record_id} className="log-item">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                    <span>Record #{log.record_id}</span>
+                    <span>{log.timestamp}</span>
+                  </div>
+                  <p className="log-hash">Hash: {log.audio_hash}</p>
+                  <p style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                    <strong>Score:</strong> {log.spoof_score_pct}% | <strong>Synthetic:</strong> {log.is_synthetic ? "True" : "False"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
-
-export default App
