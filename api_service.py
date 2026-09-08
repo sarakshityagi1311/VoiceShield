@@ -3,15 +3,20 @@ import shutil
 import tempfile
 import torch
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from main_pipeline import VoiceSpoofCNN, process_and_log_audio
 from blockchain_logger import account, contract
 
-app = FastAPI(
-    title="Synthetic Voice Detection & EVM Logging API",
-    version="1.0.0"
-)
+app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows requests from Vercel and localhost
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 # Load Model Architecture & Weights
 model = VoiceSpoofCNN()
 if os.path.exists("voice_spoof_cnn.pth"):
