@@ -3,7 +3,7 @@ import axios from 'axios';
 import { ShieldCheck, AlertTriangle, Database, Cpu, RefreshCw } from 'lucide-react';
 import './index.css';
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "https://random-subdomain.loca.lt";
 
 export default function App() {
   const [walletAddress, setWalletAddress] = useState("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
