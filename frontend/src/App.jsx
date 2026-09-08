@@ -3,7 +3,7 @@ import axios from 'axios';
 import { ShieldCheck, AlertTriangle, Database, Cpu, RefreshCw } from 'lucide-react';
 import './index.css';
 
-const API_BASE = "https://xxxx-xx-xx-xx.ngrok-free.app"; // Replace with your exact ngrok URL
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://voice-shield-4.onrender.com";
 
 export default function App() {
   const [walletAddress, setWalletAddress] = useState("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
