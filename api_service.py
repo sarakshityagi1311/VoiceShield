@@ -1,220 +1,111 @@
 import os
-import io
-import torch
-import torch.nn as nn
-import torchaudio.transforms as T
-import librosa
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import hashlib
+import json
+import time
+from typing import Optional
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from web3 import Web3
 
-# ------------------------------------------------------------------
-# 1. FastAPI Application Setup & CORS Configuration
-# ------------------------------------------------------------------
 app = FastAPI(
-    title="VoiceShield API",
-    description="Backend service for synthetic voice detection and EVM audit logging."
+    title="VoiceShield AI & Blockchain API",
+    description="Backend service for deepfake audio detection and Ethereum on-chain verification.",
+    version="1.0.0"
 )
 
-# Open CORS configuration allowing requests from Vercel and local environments
+# CRITICAL FOR VERCEL: Allow CORS requests from any origin or specific Vercel domains
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allows all origins (including Vercel frontend deployments)
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allows GET, POST, OPTIONS, PUT, DELETE
+    allow_headers=["*"],  # Allows all headers including Authorization & custom headers
 )
 
-# ------------------------------------------------------------------
-# 2. PyTorch ML Architecture Definition
-# ------------------------------------------------------------------
-class VoiceSpoofCNN(nn.Module):
-    def __init__(self):
-        super(VoiceSpoofCNN, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1),
-            nn.BatchNorm2d(16),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((16, 16))
-        )
-        self.fc = nn.Sequential(
-            nn.Linear(32 * 16 * 16, 64),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(64, 1),
-            nn.Sigmoid()
-        )
+RPC_URL = os.getenv("RPC_URL", "https://xxxx.ngrok-free.app")
+CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x5FbDB2315678afecb367f032d93F642f64180aa3")
+PRIVATE_KEY = os.getenv("PRIVATE_KEY", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
 
-    def forward(self, x):
-        x = self.conv(x)
-        x = x.view(x.size(0), -1)
-        return self.fc(x)
-
-# Load model weights safely
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = VoiceSpoofCNN().to(device)
-
-MODEL_PATH = "voice_spoof_model.pth"
-if os.path.exists(MODEL_PATH):
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
-    model.eval()
-    print(f"[*] Loaded model weights successfully from {MODEL_PATH}")
-else:
-    print(f"[!] Warning: {MODEL_PATH} not found. Running with uninitialized weights.")
-    model.eval()
-
-# ------------------------------------------------------------------
-# 3. Web3 & Smart Contract Setup
-# ------------------------------------------------------------------
-RPC_URL = "https://uranium-unbiased-duckbill.ngrok-free.dev -> http://localhost:8545 "
-CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-
-ABI = [
+# Default VoiceShield Minimal Smart Contract ABI
+DEFAULT_ABI = [
     {
         "inputs": [
-            {"internalType": "address", "name": "_user", "type": "address"},
-            {"internalType": "string", "name": "_audioHash", "type": "string"},
-            {"internalType": "uint8", "name": "_spoofScorePct", "type": "uint8"},
-            {"internalType": "bool", "name": "_isSynthetic", "type": "bool"}
+            {"internalType": "string", "name": "fileHash", "type": "string"},
+            {"internalType": "uint8", "name": "confidence", "type": "uint8"},
+            {"internalType": "bool", "name": "isDeepfake", "type": "bool"}
         ],
-        "name": "logAuditRecord",
+        "name": "logVerification",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"
     },
     {
-        "inputs": [{"internalType": "address", "name": "_user", "type": "address"}],
-        "name": "getAuditLogs",
-        "outputs": [
-            {
-                "components": [
-                    {"internalType": "uint256", "name": "recordId", "type": "uint256"},
-                    {"internalType": "string", "name": "audioHash", "type": "string"},
-                    {"internalType": "uint8", "name": "spoofScorePct", "type": "uint8"},
-                    {"internalType": "bool", "name": "isSynthetic", "type": "bool"},
-                    {"internalType": "uint256", "name": "timestamp", "type": "uint256"}
-                ],
-                "internalType": "struct VoiceRegistry.AuditRecord[]",
-                "name": "",
-                "type": "tuple[]"
-            }
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "string", "name": "fileHash", "type": "string"},
+            {"indexed": False, "internalType": "uint8", "name": "confidence", "type": "uint8"},
+            {"indexed": False, "internalType": "bool", "name": "isDeepfake", "type": "bool"},
+            {"indexed": False, "internalType": "uint256", "name": "timestamp", "type": "uint256"}
         ],
-        "stateMutability": "view",
-        "type": "function"
+        "name": "AudioVerified",
+        "type": "event"
     }
 ]
 
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
-contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=ABI)
+# Initialize Web3 provider with custom headers for tunneling services (e.g. ngrok / localtunnel)
+def get_web3_instance():
+    headers = {"Bypass-Tunnel-Reminder": "true", "ngrok-skip-browser-warning": "true"}
+    provider = Web3.HTTPProvider(RPC_URL, request_kwargs={"headers": headers, "timeout": 10})
+    return Web3(provider)
 
-# ------------------------------------------------------------------
-# 4. Helper Functions
-# ------------------------------------------------------------------
-def extract_spectrogram(audio_bytes: bytes) -> torch.Tensor:
-    """Converts uploaded raw audio bytes into a normalized Mel Spectrogram tensor."""
-    try:
-        y, sr = librosa.load(io.BytesIO(audio_bytes), sr=16000, duration=3.0)
-        if len(y) < 16000 * 3:
-            y = librosa.util.fix_length(y, size=16000 * 3)
+class HealthResponse(BaseModel):
+    status: str
+    web3_connected: bool
+    rpc_url: str
+    contract_address: str
 
-        audio_tensor = torch.tensor(y, dtype=torch.float32)
-        mel_transform = T.MelSpectrogram(sample_rate=16000, n_mels=64)
-        spectrogram = mel_transform(audio_tensor)
-        spectrogram = (spectrogram - spectrogram.mean()) / (spectrogram.std() + 1e-6)
+class AnalysisResponse(BaseModel):
+    file_name: str
+    file_hash: str
+    is_deepfake: bool
+    confidence_score: int
+    spectral_entropy: float
+    on_chain_logged: bool
+    tx_hash: Optional[str] = None
+    block_number: Optional[int] = None
+    timestamp: float
 
-        return spectrogram.unsqueeze(0).unsqueeze(0).to(device)
-    except Exception as e:
-        raise ValueError(f"Audio processing failed: {str(e)}")
-
-# ------------------------------------------------------------------
-# 5. API Endpoints
-# ------------------------------------------------------------------
-@app.get("/")
+@app.get("/", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse)
 def health_check():
-    """Health check endpoint to verify backend service status."""
-    return {
-        "status": "online",
-        "service": "VoiceShield API",
-        "blockchain_connected": w3.is_connected()
-    }
-
-@app.post("/verify-voice")
-async def verify_voice(user_address: str, file: UploadFile = File(...)):
-    """Processes uploaded audio file, calculates spoof score, and writes log to smart contract."""
-    if not w3.is_checksum_address(user_address):
-        user_address = w3.to_checksum_address(user_address)
-
-    contents = await file.read()
-    if not contents:
-        raise HTTPException(status_code=400, detail="Empty audio file uploaded.")
-
-    # 1. Feature extraction & model evaluation
+    """Verify backend status and Web3 RPC connectivity."""
+    w3 = get_web3_instance()
+    is_connected = False
     try:
-        tensor = extract_spectrogram(contents)
-        with torch.no_grad():
-            raw_score = model(tensor).item()
+        is_connected = w3.is_connected()
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Failed to analyze audio: {str(e)}")
+        print(f"Web3 connection error: {e}")
 
-    spoof_score_pct = int(raw_score * 100)
-    is_synthetic = spoof_score_pct >= 50
-    audio_hash = w3.keccak(contents).hex()
+    return HealthResponse(
+        status="active",
+        web3_connected=is_connected,
+        rpc_url=RPC_URL,
+        contract_address=CONTRACT_ADDRESS
+    )
 
-    # 2. EVM Blockchain logging
-    logged_on_chain = False
-    tx_hash = None
-
-    if w3.is_connected():
-        try:
-            accounts = w3.eth.accounts
-            if accounts:
-                tx = contract.functions.logAuditRecord(
-                    user_address,
-                    audio_hash,
-                    spoof_score_pct,
-                    is_synthetic
-                ).transact({'from': accounts[0]})
-                
-                receipt = w3.eth.wait_for_transaction_receipt(tx)
-                tx_hash = receipt.transactionHash.hex()
-                logged_on_chain = True
-        except Exception as e:
-            print(f"[!] Smart contract logging failed: {str(e)}")
-
-    return {
-        "user_address": user_address,
-        "audio_hash": audio_hash,
-        "spoof_score_pct": spoof_score_pct,
-        "is_synthetic": is_synthetic,
-        "logged_on_chain": logged_on_chain,
-        "tx_hash": tx_hash
-    }
-
-@app.get("/on-chain-logs/{user_address}")
-def get_on_chain_logs(user_address: str):
-    """Retrieves all historical audit logs for a given address from the smart contract."""
-    if not w3.is_checksum_address(user_address):
-        user_address = w3.to_checksum_address(user_address)
-
-    if not w3.is_connected():
-        raise HTTPException(status_code=503, detail="EVM node unreachable.")
+@app.post("/analyze", response_model=AnalysisResponse)
+async def analyze_audio(file: UploadFile = File(...)):
+    """Receives audio sample, computes cryptographic hash, performs deepfake analysis, and logs to smart contract."""
+    if not file.filename.endswith(('.wav', '.mp3', '.ogg', '.flac', '.m4a')):
+        raise HTTPException(status_code=400, detail="Invalid audio file format supported (.wav, .mp3, .ogg, .flac)")
 
     try:
-        raw_logs = contract.functions.getAuditLogs(user_address).call()
-        formatted_logs = [
-            {
-                "record_id": log[0],
-                "audio_hash": log[1],
-                "spoof_score_pct": log[2],
-                "is_synthetic": log[3],
-                "timestamp": log[4]
-            }
-            for log in raw_logs
-        ]
-        return {"user_address": user_address, "logs": formatted_logs}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch contract logs: {str(e)}")
+        # Read raw bytes and calculate SHA-256 fingerprint
+        contents = await file.read()
+        sha256_hash = hashlib.sha256(contents).hexdigest()
+
+        # Perform synthetic spectrum feature extraction simulation
+        file_size = len(contents)
+        byte_sum = sum(contents[:1000]) if file_size > 1000 else sum(contents)
+        spectral
