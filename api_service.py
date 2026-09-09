@@ -6,7 +6,27 @@ import torchaudio
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from web3 import Web3
-from main_pipeline import SpoofDetectorCNN
+import torch
+import torch.nn as nn
+
+# Inline model architecture matching your spoof_detector.pt checkpoint
+class SpoofDetectorCNN(nn.Module):
+    def __init__(self):
+        super(SpoofDetectorCNN, self).__init__()
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.fc1 = nn.Linear(64 * 16 * 23, 128)
+        self.fc2 = nn.Linear(128, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.pool(torch.relu(self.conv1(x)))
+        x = self.pool(torch.relu(self.conv2(x)))
+        x = torch.flatten(x, 1)
+        x = torch.relu(self.fc1(x))
+        x = self.sigmoid(self.fc2(x))
+        return x
 
 app = FastAPI(title="VoiceShield API")
 
