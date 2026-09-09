@@ -6,7 +6,7 @@ import torchaudio
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from web3 import Web3
-from phase1_ml_pipeline import SpoofDetectorCNN
+from main_pipeline import SpoofDetectorCNN
 
 app = FastAPI(title="VoiceShield API")
 
