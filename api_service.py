@@ -6,10 +6,9 @@ import torchaudio
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from web3 import Web3
-import torch
 import torch.nn as nn
 
-# Inline model architecture matching your spoof_detector.pt checkpoint
+# Model architecture matching your trained spoof_detector.pt checkpoint
 class SpoofDetectorCNN(nn.Module):
     def __init__(self):
         super(SpoofDetectorCNN, self).__init__()
@@ -28,9 +27,9 @@ class SpoofDetectorCNN(nn.Module):
         x = self.sigmoid(self.fc2(x))
         return x
 
-app = FastAPI(title="VoiceShield API")
+app = FastAPI(title="VoiceShield API - production")
 
-# Configure CORS
+# Enable Cross-Origin Resource Sharing for Vercel Frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -39,12 +38,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load Environment Variables
+# Load Environment Variables with production fallbacks
 RPC_URL = os.getenv("RPC_URL", "http://127.0.0.1:8545")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x5FbDB2315678afecb367f032d93F642f64180aa3")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
 
-# Load PyTorch Model
+# Initialize PyTorch Model on CPU
 device = torch.device('cpu')
 model = SpoofDetectorCNN()
 try:
@@ -53,10 +52,10 @@ try:
 except Exception as e:
     print(f"Warning: Could not load model weights: {e}")
 
-# Web3 Setup (bypasses ngrok warning page)
+# Web3 Configuration with ngrok browser-warning bypass
 w3 = Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={"headers": {"ngrok-skip-browser-warning": "true"}}))
 
-# Minimal Contract ABI
+# VoiceRegistry Smart Contract ABI
 CONTRACT_ABI = [
     {
         "inputs": [
@@ -72,16 +71,13 @@ CONTRACT_ABI = [
 ]
 
 def analyze_audio_tensor(waveform, sr):
-    # Resample to 16kHz if necessary
     if sr != 16000:
         resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=16000)
         waveform = resampler(waveform)
 
-    # Downmix multi-channel audio to mono
     if waveform.shape[0] > 1:
         waveform = torch.mean(waveform, dim=0, keepdim=True)
 
-    # Evaluate using 3-second (48000 samples) sliding windows
     stride = 48000
     chunk_scores = []
     
@@ -105,7 +101,7 @@ def analyze_audio_tensor(waveform, sr):
 
     return max(chunk_scores) if chunk_scores else 0.0
 
-ddef commit_to_blockchain(file_hash: str, is_synthetic: bool, confidence: float):
+def commit_to_blockchain(file_hash: str, is_synthetic: bool, confidence: float):
     if not w3.is_connected():
         return "Web3 Not Connected"
 
@@ -119,12 +115,10 @@ ddef commit_to_blockchain(file_hash: str, is_synthetic: bool, confidence: float)
             'from': account.address,
             'nonce': w3.eth.get_transaction_count(account.address),
             'gas': 200000,
-            'gasPrice': w3.eth.gas_price,  # Uses dynamic gas price for Hardhat/EVM compatibility
+            'gasPrice': w3.eth.gas_price,
         })
 
         signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
-        
-        # Web3.py v6+ attribute fix (raw_transaction instead of rawTransaction)
         raw_bytes = getattr(signed_tx, 'raw_transaction', getattr(signed_tx, 'rawTransaction', None))
         
         tx_hash = w3.eth.send_raw_transaction(raw_bytes)
@@ -138,6 +132,7 @@ ddef commit_to_blockchain(file_hash: str, is_synthetic: bool, confidence: float)
 def health_check():
     return {
         "status": "VoiceShield API Active",
+        "service_url": "https://voiceshield-13.onrender.com",
         "web3_connected": w3.is_connected()
     }
 
@@ -147,14 +142,10 @@ async def verify_audio(file: UploadFile = File(...)):
         audio_bytes = await file.read()
         file_hash = hashlib.sha256(audio_bytes).hexdigest()
 
-        # Load tensor directly from memory bytes
         waveform, sr = torchaudio.load(io.BytesIO(audio_bytes))
-
         spoof_score = analyze_audio_tensor(waveform, sr)
         
-        # Decision boundary set to 0.50 for modern speech synthesis detection
         is_synthetic = spoof_score >= 0.50
-
         tx_hash = commit_to_blockchain(file_hash, is_synthetic, spoof_score)
 
         return {
