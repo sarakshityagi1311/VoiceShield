@@ -105,7 +105,7 @@ def analyze_audio_tensor(waveform, sr):
 
     return max(chunk_scores) if chunk_scores else 0.0
 
-def commit_to_blockchain(file_hash: str, is_synthetic: bool, confidence: float):
+ddef commit_to_blockchain(file_hash: str, is_synthetic: bool, confidence: float):
     if not w3.is_connected():
         return "Web3 Not Connected"
 
@@ -119,16 +119,19 @@ def commit_to_blockchain(file_hash: str, is_synthetic: bool, confidence: float):
             'from': account.address,
             'nonce': w3.eth.get_transaction_count(account.address),
             'gas': 200000,
-            'maxFeePerGas': w3.to_wei('2', 'gwei'),
-            'maxPriorityFeePerGas': w3.to_wei('1', 'gwei'),
+            'gasPrice': w3.eth.gas_price,  # Uses dynamic gas price for Hardhat/EVM compatibility
         })
 
         signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
-        tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        
+        # Web3.py v6+ attribute fix (raw_transaction instead of rawTransaction)
+        raw_bytes = getattr(signed_tx, 'raw_transaction', getattr(signed_tx, 'rawTransaction', None))
+        
+        tx_hash = w3.eth.send_raw_transaction(raw_bytes)
         return w3.to_hex(tx_hash)
     except Exception as e:
         print(f"Blockchain Error: {e}")
-        return "Transaction Failed"
+        return f"Transaction Failed: {str(e)}"
 
 @app.get("/")
 @app.get("/health")
