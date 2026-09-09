@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-// Hardcoded fallback points directly to your active Render service
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://voiceshield-13.onrender.com';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://voiceshield-api.onrender.com';
 
 export default function App() {
   const [file, setFile] = useState(null);
