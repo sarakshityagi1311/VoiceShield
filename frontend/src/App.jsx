@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
-// Read API URL from Vite environment variable, fallback to Render URL
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://voiceshield-api.onrender.com';
+// Hardcoded fallback points directly to your active Render service
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://voiceshield-13.onrender.com';
 
 export default function App() {
   const [file, setFile] = useState(null);
@@ -10,7 +10,6 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [backendStatus, setBackendStatus] = useState('offline');
 
-  // Check backend connectivity on mount
   useEffect(() => {
     checkHealth();
   }, []);
@@ -20,15 +19,19 @@ export default function App() {
       const res = await fetch(`${API_BASE_URL}/health`);
       if (res.ok) {
         const data = await res.json();
-        setBackendStatus(data.status === 'healthy' ? 'online' : 'degraded');
-        setStatus('Backend online and ready.');
+        setBackendStatus(data.web3_connected ? 'online' : 'degraded');
+        setStatus(
+          data.web3_connected
+            ? 'System Ready. API & Blockchain active.'
+            : 'API active (Blockchain disconnected).'
+        );
       } else {
         setBackendStatus('offline');
-        setStatus('Backend returned non-200 response.');
+        setStatus('API Offline.');
       }
-    } catch (err) {
+    } catch (error) {
       setBackendStatus('offline');
-      setStatus('Cannot reach backend server.');
+      setStatus('Unable to connect to VoiceShield API service.');
     }
   };
 
@@ -38,7 +41,7 @@ export default function App() {
     }
   };
 
-  const handleUpload = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file) {
       alert('Please select an audio file first.');
@@ -62,23 +65,25 @@ export default function App() {
       }
 
       const result = await response.json();
-      setStatus(`Processing complete! Verdict: ${result.is_deepfake ? 'DEEPFAKE DETECTED' : 'AUTHENTIC VOICE'}`);
-      
-      // Append new log item
-      setLogs((prev) => [
+
+      setLogs((prevLogs) => [
         {
-          id: Date.now(),
-          filename: file.name,
-          verdict: result.is_deepfake ? 'Deepfake' : 'Authentic',
-          txHash: result.tx_hash || 'Pending / Local',
+          filename: result.filename,
+          hash: result.file_hash,
+          score: result.spoof_probability,
+          classification: result.classification,
+          isSynthetic: result.is_synthetic,
+          txHash: result.tx_hash,
           timestamp: new Date().toLocaleTimeString(),
         },
-        ...prev,
+        ...prevLogs,
       ]);
+
+      setStatus(`Verification complete. Result: ${result.classification}`);
     } catch (error) {
-      console.error('Processing Error:', error);
+      console.error('Error uploading file:', error);
       alert(`Error processing audio: ${error.message}`);
-      setStatus('Network Error / Processing failed.');
+      setStatus('Verification failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -87,93 +92,215 @@ export default function App() {
   return (
     <div style={styles.container}>
       <header style={styles.header}>
-        <h1>VoiceShield Audit Dashboard</h1>
+        <h1 style={styles.title}>VoiceShield</h1>
+        <p style={styles.subtitle}>AI Deepfake Audio Detection & Immutable Verification Ledger</p>
         <div style={styles.badgeContainer}>
-          <span style={{
-            ...styles.badge,
-            backgroundColor: backendStatus === 'online' ? '#22c55e' : '#ef4444'
-          }}>
+          <span
+            style={{
+              ...styles.badge,
+              backgroundColor:
+                backendStatus === 'online'
+                  ? '#22c55e'
+                  : backendStatus === 'degraded'
+                  ? '#eab308'
+                  : '#ef4444',
+            }}
+          >
             API: {backendStatus.toUpperCase()}
           </span>
         </div>
       </header>
 
       <main style={styles.main}>
-        {/* Upload Card */}
-        <div style={styles.card}>
-          <h2>Verify Voice Recording</h2>
-          <form onSubmit={handleUpload} style={styles.form}>
-            <input 
-              type="file" 
-              accept="audio/*" 
-              onChange={handleFileChange} 
-              style={styles.fileInput} 
+        <section style={styles.card}>
+          <h2 style={styles.cardTitle}>Verify Voice Recording</h2>
+          <form onSubmit={handleSubmit} style={styles.form}>
+            <input
+              type="file"
+              accept="audio/*"
+              onChange={handleFileChange}
+              style={styles.fileInput}
+              disabled={loading}
             />
-            <button 
-              type="submit" 
-              disabled={loading || !file} 
-              style={loading ? {...styles.button, opacity: 0.6} : styles.button}
+            <button
+              type="submit"
+              disabled={loading || !file}
+              style={{
+                ...styles.button,
+                opacity: loading || !file ? 0.6 : 1,
+                cursor: loading || !file ? 'not-allowed' : 'pointer',
+              }}
             >
-              {loading ? 'Processing...' : 'Verify & Commit On-Chain'}
+              {loading ? 'Analyzing Spectrogram...' : 'Verify Recording'}
             </button>
           </form>
-          <p style={styles.statusText}><strong>Status:</strong> {status}</p>
-        </div>
+          <p style={styles.statusText}>Status: {status}</p>
+        </section>
 
-        {/* Audit Log Table */}
-        <div style={styles.card}>
-          <h2>Smart Contract Audit Logs</h2>
+        <section style={styles.card}>
+          <h2 style={styles.cardTitle}>Smart Contract Audit Logs</h2>
           {logs.length === 0 ? (
             <p style={styles.emptyText}>No verifications executed in this session.</p>
           ) : (
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Time</th>
-                  <th style={styles.th}>File</th>
-                  <th style={styles.th}>Result</th>
-                  <th style={styles.th}>Transaction Hash</th>
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map((log) => (
-                  <tr key={log.id}>
-                    <td style={styles.td}>{log.timestamp}</td>
-                    <td style={styles.td}>{log.filename}</td>
-                    <td style={styles.td}>
-                      <span style={{
-                        color: log.verdict === 'Deepfake' ? '#ef4444' : '#22c55e',
-                        fontWeight: 'bold'
-                      }}>
-                        {log.verdict}
-                      </span>
-                    </td>
-                    <td style={{...styles.td, fontFamily: 'monospace'}}>{log.txHash}</td>
+            <div style={styles.tableContainer}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Time</th>
+                    <th style={styles.th}>File Name</th>
+                    <th style={styles.th}>SHA-256 Hash</th>
+                    <th style={styles.th}>Spoof %</th>
+                    <th style={styles.th}>Classification</th>
+                    <th style={styles.th}>Transaction Hash</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {logs.map((log, index) => (
+                    <tr key={index} style={styles.tr}>
+                      <td style={styles.td}>{log.timestamp}</td>
+                      <td style={styles.td}>{log.filename}</td>
+                      <td style={{ ...styles.td, ...styles.mono }}>
+                        {log.hash.substring(0, 10)}...
+                      </td>
+                      <td style={styles.td}>{log.score}%</td>
+                      <td style={styles.td}>
+                        <span
+                          style={{
+                            ...styles.tag,
+                            backgroundColor: log.isSynthetic ? '#fecaca' : '#bbf7d0',
+                            color: log.isSynthetic ? '#991b1b' : '#166534',
+                          }}
+                        >
+                          {log.classification}
+                        </span>
+                      </td>
+                      <td style={{ ...styles.td, ...styles.mono }}>
+                        {log.txHash !== 'Transaction Failed' && log.txHash !== 'Web3 Not Connected'
+                          ? `${log.txHash.substring(0, 10)}...`
+                          : log.txHash}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </div>
+        </section>
       </main>
     </div>
   );
 }
 
-// Inline styles object for quick setup
 const styles = {
-  container: { maxWidth: '900px', margin: '0 auto', padding: '20px', fontFamily: 'sans-serif', color: '#1e293b' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' },
-  badgeContainer: { display: 'flex', gap: '10px' },
-  badge: { color: '#fff', padding: '4px 12px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' },
-  main: { marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '20px' },
-  card: { padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc' },
-  form: { display: 'flex', gap: '10px', margin: '15px 0' },
-  fileInput: { padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', flexGrow: 1 },
-  button: { padding: '10px 20px', backgroundColor: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
-  statusText: { fontSize: '14px', color: '#64748b' },
-  emptyText: { color: '#94a3b8', fontStyle: 'italic' },
-  table: { width: '100%', borderCollapse: 'collapse', marginTop: '10px' },
-  th: { textAlign: 'left', borderBottom: '2px solid #cbd5e1', padding: '8px', fontSize: '14px' },
-  td: { padding: '8px', borderBottom: '1px solid #e2e8f0', fontSize: '14px' }
+  container: {
+    fontFamily: 'Inter, system-ui, Avenir, Helvetica, Arial, sans-serif',
+    backgroundColor: '#0f172a',
+    color: '#f8fafc',
+    minHeight: '100vh',
+    padding: '2rem',
+  },
+  header: {
+    textAlign: 'center',
+    marginBottom: '2rem',
+  },
+  title: {
+    fontSize: '2.5rem',
+    fontWeight: '800',
+    margin: '0',
+    color: '#38bdf8',
+  },
+  subtitle: {
+    fontSize: '1rem',
+    color: '#94a3b8',
+    marginTop: '0.5rem',
+  },
+  badgeContainer: {
+    marginTop: '1rem',
+  },
+  badge: {
+    padding: '0.25rem 0.75rem',
+    borderRadius: '9999px',
+    fontSize: '0.85rem',
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  main: {
+    maxWidth: '900px',
+    margin: '0 auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2rem',
+  },
+  card: {
+    backgroundColor: '#1e293b',
+    borderRadius: '0.75rem',
+    padding: '1.5rem',
+    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+  },
+  cardTitle: {
+    fontSize: '1.25rem',
+    fontWeight: '600',
+    marginBottom: '1rem',
+    color: '#f1f5f9',
+  },
+  form: {
+    display: 'flex',
+    gap: '1rem',
+    flexWrap: 'wrap',
+    marginBottom: '1rem',
+  },
+  fileInput: {
+    flex: '1',
+    padding: '0.5rem',
+    backgroundColor: '#0f172a',
+    border: '1px solid #334155',
+    borderRadius: '0.375rem',
+    color: '#f8fafc',
+  },
+  button: {
+    backgroundColor: '#0284c7',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '0.375rem',
+    padding: '0.5rem 1.5rem',
+    fontWeight: '600',
+  },
+  statusText: {
+    fontSize: '0.9rem',
+    color: '#cbd5e1',
+    margin: '0',
+  },
+  emptyText: {
+    color: '#64748b',
+    fontStyle: 'italic',
+  },
+  tableContainer: {
+    overflowX: 'auto',
+  },
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    textAlign: 'left',
+    fontSize: '0.9rem',
+  },
+  th: {
+    borderBottom: '2px solid #334155',
+    padding: '0.75rem',
+    color: '#94a3b8',
+  },
+  tr: {
+    borderBottom: '1px solid #334155',
+  },
+  td: {
+    padding: '0.75rem',
+  },
+  mono: {
+    fontFamily: 'monospace',
+  },
+  tag: {
+    padding: '0.25rem 0.5rem',
+    borderRadius: '0.25rem',
+    fontWeight: 'bold',
+    fontSize: '0.75rem',
+  },
 };
