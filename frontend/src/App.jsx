@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://voiceshield-api.onrender.com';
+// Points directly to your active deployment URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://voiceshield-13.onrender.com';
 
 export default function App() {
   const [file, setFile] = useState(null);
